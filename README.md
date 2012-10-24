@@ -14,4 +14,4 @@ At present the module is coded to require ProcessWire 2.1 or greater but this wa
 Installation
 ------------
 
-The module (a single file) should be copied to the site/modules folder, optionally within it's own folder for neatness!
+The module (a single file) should be copied to the site/modules folder, optionally within its own folder for neatness!
