@@ -1,6 +1,11 @@
 ProcessPageDraft
 ================
 
+WARNING
+-------
+
+This code does not currently correctly handle repeater fields. Consider it a public beta for testing. No harmful effects known, but repeater fields appear to retain original value and are not correctly overwritten when a draft page is published.
+
 Introduction
 ------------
 
