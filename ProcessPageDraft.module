@@ -23,21 +23,12 @@ class ProcessPageDraft extends Process {
 	public function hookPageListActions(HookEvent $event) {
 		$page = $event->arguments[0];
 		$actions = $event->return;
-		if(substr($page->title, -1 * strlen($this->_('(DRAFT)'))) == $this->_('(DRAFT)')) {
-			$new_action = array(
-				'cn' => 'draft',
-				'name' => 'publish draft',
-				'url' => $this->config->urls->admin . "page/draft/publish/?id={$page->id}"
-			);
-			$actions[] = $new_action;
-		} else {
-			$new_action = array(
-				'cn' => 'draft',
-				'name' => 'create draft',
-				'url' => $this->config->urls->admin . "page/draft/create/?id={$page->id}"
-			);
-			$actions[] = $new_action;
-		}
+		$new_action = array(
+			'cn' => 'draft',
+			'name' => 'create draft',
+			'url' => $this->config->urls->admin . "page/draft/create/?id={$page->id}"
+		);
+		$actions[] = $new_action;
 		$event->return = $actions;
 	}
 	
@@ -52,21 +43,6 @@ class ProcessPageDraft extends Process {
 		$clone->save();
 		
 		$this->session->redirect($this->config->urls->admin . 'page/list/?open=' . $clone->id);
-	}
-	
-	public function executePublish() {
-		$page = $this->pages->get((int) $this->input->get->id);
-		$originalname = substr($page->name, 0, -33);
-		$originalpage = wire('pages')->get("name='" . $originalname . "'", NULL, $page->parent);
-
-		foreach($page->template->fields->getArray() as $field) {
-			if($field->name != 'title') $originalpage->set($field->name, $page->get($field->name));
-		}
-
-		$page->trash();
-		$originalpage->save();
-		
-		$this->session->redirect($this->config->urls->admin . 'page/list/?open=' . $originalpage->id);	
 	}
 	
 	public function ___install() {
