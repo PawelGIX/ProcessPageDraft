@@ -70,8 +70,11 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 
 		$page = $event->arguments[0];
 
-		// $this->message("hookPageSave");
-		$this->session->redirect($this->config->urls->admin . 'page/draft/publish/?id=' . $page->id);
+		$save_button = $this->input->post->submit_save;
+
+        if($this->input->post->submit_save && is_array($save_button) && isset($save_button['draft']) ){
+			$this->session->redirect($this->config->urls->admin . 'page/draft/publish/?id=' . $page->id);
+		}
 	}
 
 	public function pageDeletedHook($event){
@@ -79,9 +82,12 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 		$page = $event->arguments[0];
 
 		$sth = $this->DBdeleteAllDraftsOf($page->id);
-		$count = $sth->rowCount();
 
-		$this->message($this->_("Deleted $count draft pages."));
+		// var_dump($sth);
+		// if($sth){
+		// 	$count = $sth->rowCount();
+		// 	$this->message($this->_("Deleted $count draft pages."));
+		// }
 	}
 
 
@@ -91,44 +97,44 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 		$page = $this->pages->get( $this->input->get->id );
 
 
-        $settingsTab = $form->find("id=ProcessPageEditSettings")->first();
-        $pagename = $form->find("id=Inputfield__pw_page_name")->first();
+		// has drafts
+		if( $this->DBgetDraftRows($page->id) ){
 
-        $pagestatus = $form->find("id=Inputfield_status")->first();
-
-
-		$pagename->attr('disabled', 'disabled');
-
-		$pagestatus->addHookAfter('render',function ($event)
-		{
-			$event->return = preg_replace("/value='".Page::statusHidden."'/i", "$0 disabled='disabled'", $event->return);
-		});
+	        $settingsTab = $form->find("id=ProcessPageEditSettings")->first();
+	        $pagename    = $form->find("id=Inputfield__pw_page_name")->first();
+	        $pagestatus  = $form->find("id=Inputfield_status")->first();
 
 
+			$pagename->attr('readOnly', 'true');
 
-
-		$tab = new InputfieldWrapper();
-		$id = $this->className() . 'Drafts';
-		$title = $this->_('Drafts'); // Tab Label: Settings
-		$tab->attr('id', $id);
-		$tab->attr('title', $title);
-
-		// construct contents inside a container
-			$field = $this->modules->get("InputfieldMarkup");
-			$field->label = $this->_("Draft pages");
-			$field->value = $this->renderDraftsTable($page);
-
-		// append the markup to the tab and the tab to the form
-		$tab->append($field);
-		$form->insertAfter($tab, $settingsTab);
+			// $pagestatus->addHookAfter('render',function ($event)
+			// {
+			// 	$event->return = preg_replace("/value='".Page::statusHidden."'/i", "$0 disabled='disabled'", $event->return);
+			// });
+			$settingsTab->remove($pagestatus);
 
 
 
 
+			$tab = new InputfieldWrapper();
+			$id = $this->className() . 'Drafts';
+			$title = $this->_('Drafts'); // Tab Label: Settings
+			$tab->attr('id', $id);
+			$tab->attr('title', $title);
 
-		$page = wire('pages')->get( $this->input->get->id );
+				// construct contents inside a container
+				$field = $this->modules->get("InputfieldMarkup");
+				$field->label = $this->_("Draft pages");
+				$field->value =  $this->renderDraftsTable($page);
 
-		if( strpos($page->name, 'draft-') === 0 ){
+			// append the markup to the tab and the tab to the form
+			$tab->append($field);
+			$form->insertAfter($tab, $settingsTab);
+
+		}
+
+		// is draft 
+		if( $page->isDraft() ){
 	        // new submit button
 	        $f = $this->modules->InputfieldSubmit;
 	        $f->attr("name+id", "submit_save[draft]");
@@ -185,13 +191,12 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 		if($this->config->ajax){
 			// manipulate the json returned and remove any pages found from array
 			$json = json_decode($event->return, true);
-				// die( var_dump($json) );
+				//  var_dump($json) ;
 			foreach($json['children'] as $key => $child){
 
-				// 	$page = wire('pages')->get( $child['id'] );
+				// $page = wire('pages')->get( $child['id'] );
 				// if( $page->isDraft() )
-				if( strpos( $child['path'], '/draft-' ) === 0 )
-			   		unset( $json['children'][$key] );
+				//   		unset( $json['children'][$key] );
 
 			}
 
@@ -261,7 +266,8 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 
 		$draftPage = wire('pages')->clone($page);
 		$draftPage->name = 'draft-' . md5(time().$page->id) . '-' . $page->id ;
-		$draftPage->title = $page->title . ' (' . $this->_('DRAFT'). "$count)";
+		$draftPage->title = $page->title ;
+		// $draftPage->title = $page->title . ' (' . $this->_('DRAFT'). "$count)";
 		$draftPage->addStatus(Page::statusHidden);
 		$draftPage->removeStatus(Page::statusUnpublished);
 
@@ -463,6 +469,7 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 			$page->name = "draft";
 			$page->title = $this->_("Draft Page");
 			$page->process = $this;
+			$page->addStatus( Page::statusHidden );
 			$page->sort = $parent->numChildren;
 			$page->save();
 		}
