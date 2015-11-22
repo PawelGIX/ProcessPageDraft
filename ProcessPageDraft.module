@@ -40,7 +40,7 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 		parent::init();
 
         $this->addHookAfter("ProcessPageEdit::buildForm", $this, "pageEditBuildForm");
-		
+
         $this->addHookAfter("Pages::deleted", $this, "pageDeletedHook");
         $this->addHookAfter('ProcessPageList::execute', $this, 'PageListExecuteHook');
 
@@ -433,7 +433,7 @@ class ProcessPageDraft extends Process implements ConfigurableModule {
 		$table = self::dbTableName;
 		$sql = 	"CREATE TABLE IF NOT EXISTS `$table` (
 					`id` INT AUTO_INCREMENT NOT NULL,
-					`created` UNIX_TIMESTAMP  NOT NULL,
+					`created` TIMESTAMP,
 					`page_id` INT NOT NULL,
 					`draft_id` INT NOT NULL,
 					PRIMARY KEY (`id`)
