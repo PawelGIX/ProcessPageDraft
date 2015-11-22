@@ -1,0 +1,17 @@
+
+.PageListItem > a .draft-badge:before{
+    display: none;
+}
+.PageListItem > a .draft-badge{
+    /*background: #eee;*/
+    border-width: 1px;
+    border-style: solid;
+    border-color: inherit;
+    opacity: .3;
+    font-size: 0.7em;
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    margin: 0 0.5em 0 0;
+    text-decoration: none;
+
+}

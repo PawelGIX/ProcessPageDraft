@@ -1,64 +1,455 @@
 <?php
 
-class ProcessPageDraft extends Process {
+class ProcessPageDraft extends Process implements ConfigurableModule {
+
+
+	const dbTableName = 'draft_pages';
 
 	public static function getModuleInfo() {
 		return array(
-			'title' => 'Page Draft Control',
-			'version' => '0.1',
+			'title' => __('Page Draft Control',__FILE__),
+			'version' => '0.2',
 			'summary' => 'Adds ability to create draft pages (unpublished copies) for edit/preview and then publish them (switch them to live)',
-			'permission' => 'page-delete',
+			'permission' => 'page-draft',
+			'permissions' => array(
+				'page-draft' => 'Draft creation',
+			),
 			'singular' => true,
-			'autoload' => true
+			'autoload' => true,
+			// 'requires' => 'ProcessPageClone',
 		);
 	}
-	
+
+
+    static public function getDefaultData() {
+        return array(
+            'allowed_templates' => array(),
+            'drafts' => array(),
+        );
+    }
+
+    public function __construct() {
+        foreach (self::getDefaultData() as $key => $value) {
+            $this->$key = $value;
+        }
+
+		parent::__construct();
+    }
+
+	public function init() {
+		parent::init();
+
+        $this->addHookAfter("ProcessPageEdit::buildForm", $this, "pageEditBuildForm");
+		
+        $this->addHookAfter("Pages::deleted", $this, "pageDeletedHook");
+        $this->addHookAfter('ProcessPageList::execute', $this, 'PageListExecuteHook');
+
+		// $this->addHook('Page::draft', $this, 'draftHook');
+		$this->addHook('Page::draftCreate', $this, 'draftCreateHook');
+		$this->addHook('Page::draftPublish', $this, 'draftPublishHook');
+		$this->addHook('Page::isDraft', $this, 'isDraftHook');
+		// die( var_dump($this->input->post->submit_save) );
+		//  die($this->input->post->submit_save . ' '. $this->input->post->submit_save['draft']);
+        // tell processwire that this is a page save
+        if($this->input->post->submit_save && isset($this->input->post->submit_save['draft']) ){
+            // attach hook on page save
+            $this->addHookAfter("Pages::saved", $this, "pageSavedHook");
+
+        }
+	}
+
 	public function ready() {
 		$process = wire('page')->process;
 		if($process == 'ProcessPageList') {
 			$this->addHookAfter("ProcessPageListRender::getPageActions", $this, 'hookPageListActions');
+			$this->addHookAfter("ProcessPageListRender::getPageLabel", $this, 'hookPageListLabel');
 		}
+	}
+
+	public function pageSavedHook($event){
+
+		$page = $event->arguments[0];
+
+		// $this->message("hookPageSave");
+		$this->session->redirect($this->config->urls->admin . 'page/draft/publish/?id=' . $page->id);
+	}
+
+	public function pageDeletedHook($event){
+
+		$page = $event->arguments[0];
+
+		$sth = $this->DBdeleteAllDraftsOf($page->id);
+		$count = $sth->rowCount();
+
+		$this->message($this->_("Deleted $count draft pages."));
+	}
+
+
+
+    public function pageEditBuildForm($event){
+        $form = $event->return;
+		$page = $this->pages->get( $this->input->get->id );
+
+
+        $settingsTab = $form->find("id=ProcessPageEditSettings")->first();
+        $pagename = $form->find("id=Inputfield__pw_page_name")->first();
+
+        $pagestatus = $form->find("id=Inputfield_status")->first();
+
+
+		$pagename->attr('disabled', 'disabled');
+
+		$pagestatus->addHookAfter('render',function ($event)
+		{
+			$event->return = preg_replace("/value='".Page::statusHidden."'/i", "$0 disabled='disabled'", $event->return);
+		});
+
+
+
+
+		$tab = new InputfieldWrapper();
+		$id = $this->className() . 'Drafts';
+		$title = $this->_('Drafts'); // Tab Label: Settings
+		$tab->attr('id', $id);
+		$tab->attr('title', $title);
+
+		// construct contents inside a container
+			$field = $this->modules->get("InputfieldMarkup");
+			$field->label = $this->_("Draft pages");
+			$field->value = $this->renderDraftsTable($page);
+
+		// append the markup to the tab and the tab to the form
+		$tab->append($field);
+		$form->insertAfter($tab, $settingsTab);
+
+
+
+
+
+		$page = wire('pages')->get( $this->input->get->id );
+
+		if( strpos($page->name, 'draft-') === 0 ){
+	        // new submit button
+	        $f = $this->modules->InputfieldSubmit;
+	        $f->attr("name+id", "submit_save[draft]");
+	        $f->attr("value", $this->_("Publish draft") );
+			$f->class .= ' ui-priority-secondary';
+
+	        // add submit button after the regular save button
+	        $form->insertAfter($f, $form->get("submit_save"));
+		}
+    }
+
+
+	private function renderDraftsTable($page)
+	{
+		$table = $this->modules->get('MarkupAdminDataTable');
+		$table->setEncodeEntities( false );
+		$table->headerRow(array(
+			$this->_('Title'),
+			$this->_('Date'),
+			$this->_('Actions'),
+		));
+
+		$drafts = $this->DBgetDraftRows( $page->id );
+
+		foreach ($drafts as $key => $value) {
+
+			$draftPage = $this->pages->get( (int) $value['draft_id'] );
+
+			if( !$draftPage->id || $draftPage->isTrash() ){
+				$this->DBdeleteDraftRow($page->id, (int) $value['draft_id'] );
+			}
+			else{
+				$id = $draftPage->id;
+				$editURL = $this->config->urls->admin . 'page/edit/?id='.$id;
+				$viewURL = $draftPage->url;
+				$publishURL = $this->config->urls->admin . 'page/draft/publish/?id='.$id;
+
+				$table->row(array(
+					$draftPage->title,
+					date("d.m.Y",$draftPage->created),
+					"<div class=''>
+					<a href='{$editURL}'>edit</a>
+					<a href='{$viewURL}'>view</a>
+					<a href='{$publishURL}'>publish</a>
+					</div>",
+				));
+			}
+		}
+		return $table->render();
+	}
+
+	public function PageListExecuteHook(HookEvent $event){
+
+		if($this->config->ajax){
+			// manipulate the json returned and remove any pages found from array
+			$json = json_decode($event->return, true);
+				// die( var_dump($json) );
+			foreach($json['children'] as $key => $child){
+
+				// 	$page = wire('pages')->get( $child['id'] );
+				// if( $page->isDraft() )
+				if( strpos( $child['path'], '/draft-' ) === 0 )
+			   		unset( $json['children'][$key] );
+
+			}
+
+			$json['children'] = array_values($json['children']);
+
+			$event->return = json_encode($json);
+		}
+
 	}
 
 	public function hookPageListActions(HookEvent $event) {
 		$page = $event->arguments[0];
 		$actions = $event->return;
-		$new_action = array(
-			'cn' => 'draft',
-			'name' => 'create draft',
-			'url' => $this->config->urls->admin . "page/draft/create/?id={$page->id}"
-		);
-		$actions[] = $new_action;
+
+		//not in home, trash, and only in  configured allowed_templates
+		if( $page->id > 1 && in_array($page->template->name, $this->allowed_templates) && !$page->isTrash() ){
+			if( strpos($page->name, 'draft-') === false ){
+				$new_action = array(
+					'cn' => 'draft',
+					'name' => $this->_('create draft'),
+					'url' => $this->config->urls->admin . "page/draft/create/?id={$page->id}"
+				);
+				$actions[] = $new_action;
+			}
+			else
+			{
+				$new_action = array(
+					'cn' => 'draft',
+					'name' => $this->_('publish draft'),
+					'url' => $this->config->urls->admin . "page/draft/publish/?id={$page->id}",
+					'icon' => 'copy'
+				);
+				$actions[] = $new_action;
+			}
+		}
+
 		$event->return = $actions;
 	}
-	
+
+	public function hookPageListLabel(HookEvent $event) {
+		$page = $event->arguments[0];
+		$label = $event->return;
+
+		// die( $page->isDraft() );
+		// $label = "\n<!-- $label -->\n$label";
+		if( $page->isDraft() ){
+			$label = str_ireplace('label_title', 'label_title draft', $label);
+			$label =  '<span class="draft-badge badge">'. $this->_('draft') .'</span>' . $label ;
+			$label = preg_replace("/icon fa fa-fw .+?'/i", "icon fa fa-fw fa-copy'", $label);
+			// $event->return = false;
+			// return false;
+		}
+
+		$event->return = $label;
+	}
+
+	public function draftCreateHook($event) {
+		$page = $event->object;
+		$event->return = $this->draftCreate($page);
+	}
+
+
+	public function draftCreate($page){
+
+		$count = count( $this->DBgetDraftRows($page->id) );
+		if($count < 1){  $count = null; }else{ $count=" $count"; }
+
+		$draftPage = wire('pages')->clone($page);
+		$draftPage->name = 'draft-' . md5(time().$page->id) . '-' . $page->id ;
+		$draftPage->title = $page->title . ' (' . $this->_('DRAFT'). "$count)";
+		$draftPage->addStatus(Page::statusHidden);
+		$draftPage->removeStatus(Page::statusUnpublished);
+
+
+
+		$this->DBinsertDraftRow( $page->id, $draftPage->id );
+
+		return $draftPage->save();
+	}
+
+	public function draftPublishHook($event) {
+		$page = $event->object;
+		$event->return = $this->draftPublish($page);
+	}
+
+	public function draftPublish($page)
+	{
+		if( !$page->isDraft() ){
+			throw new WireException("I can't publish a page that is not a draft.", 1);
+		}
+		$draftDbRow = $this->DBgetDraftRow($page->id);
+
+		if( !$draftDbRow ){
+			throw new WireException("There is no draft in the database.", 1);
+		}
+
+		$originalID = $draftDbRow['page_id'];
+		$originalPage = wire('pages')->get($originalID);
+
+		if( !$originalPage->id ){
+			throw new WireException("The original page has already been removed.", 1);
+		}
+
+
+		// PAGE:
+		$page->name = $originalPage->name;
+		$page->parent = $originalPage->parent;
+
+		wire('pages')->trash($originalPage);
+
+		$page->removeStatus(Page::statusHidden);
+		$page->removeStatus(Page::statusUnpublished);
+
+		// SQL:
+		$this->DBdeleteDraftRow( $originalID, $page->id );
+		// assign drafts to new page
+		$this->DBupdatePublishedDraft( $originalID, $page->id );
+
+		return $page->save();
+	}
+
+	public function isDraftHook($event) {
+		$page = $event->object;
+		$event->return = $this->isDraft($page);
+	}
+
+	public function isDraft($page)
+	{
+		$row = (bool) $this->DBgetDraftRow($page->id);
+		return $row;
+	}
+
 	public function executeCreate() {
 		$page = $this->pages->get((int) $this->input->get->id);
-		
-		$clone = wire('pages')->clone($page);
-		$clone->name = $page->name . '-' . md5(time());
-		$clone->title = $page->title . $this->_('(DRAFT)');
-		$clone->addStatus(Page::statusHidden);
-		$clone->removeStatus(Page::statusUnpublished);
-		$clone->save();
-		
-		$this->session->redirect($this->config->urls->admin . 'page/list/?open=' . $clone->id);
+		// die(var_dump($page->id));
+		$draftPage = $this->draftCreate($page);
+
+
+		$this->session->redirect($this->config->urls->admin . 'page/list/?open=' . $draftPage->id);
 	}
-	
+
+	public function executePublish() {
+		$page = $this->pages->get((int) $this->input->get->id);
+
+		$this->draftPublish($page);
+
+		$this->session->redirect($this->config->urls->admin . 'page/list/?open=' . $page->id);
+	}
+
+
+
+
+	// DB QUERIES
+
+	private function DBgetDraftRows($page_id=null)
+	{
+		$table = self::dbTableName;
+		if( $page_id ){
+			$sth = $this->database->prepare("SELECT * FROM $table WHERE page_id=:page_id");
+		}else{
+			$sth = $this->database->prepare("SELECT * FROM $table");
+		}
+
+		$sth->execute(array(
+			'page_id' => $page_id
+		));
+		return $sth->fetchAll(PDO::FETCH_ASSOC);
+	}
+
+	private function DBinsertDraftRow($page_id, $draft_id)
+	{
+		$created = time();
+		$table = self::dbTableName;
+		$sth = $this->database->prepare("INSERT INTO $table (created,page_id,draft_id)
+										VALUES(:created,:page_id,:draft_id)");
+		return $sth->execute(array(
+			':created'    => $created,
+			':page_id'    => $page_id,
+			':draft_id'   => $draft_id,
+		));
+	}
+
+	private function DBupdatePublishedDraft($original_id, $draft_id)
+	{
+		$table = self::dbTableName;
+		$sth = $this->database->prepare("UPDATE $table SET page_id=:new_page_id WHERE page_id=:original_page_id");
+		return $sth->execute(array(
+			':new_page_id'   => $draft_id,
+			':original_page_id'   => $original_id,
+		));
+	}
+
+	private function DBdeleteAllDraftsOf($original_id)
+	{
+		$table = self::dbTableName;
+		$sth = $this->database->prepare("DELETE FROM $table WHERE page_id=:original_page_id");
+		return $sth->execute(array(
+			':original_page_id'   => $original_id,
+		));
+	}
+
+	private function DBdeleteDraftRow($page_id, $draft_id)
+	{
+		$table = self::dbTableName;
+		$sth = $this->database->prepare("DELETE FROM $table WHERE page_id=:page_id AND draft_id=:draft_id");
+		return $sth->execute(array(
+			':page_id'    => $page_id,
+			':draft_id'   => $draft_id,
+		));
+	}
+
+	private function DBgetDraftRow($draft_id)
+	{
+		$table = self::dbTableName;
+		$sth = $this->database->prepare("SELECT * FROM $table WHERE draft_id=:draft_id LIMIT 1");
+		$sth->execute(array(
+			':draft_id'   => $draft_id,
+		));
+		return $sth->fetch(PDO::FETCH_ASSOC);
+	}
+
+
+	// MODULE CONFIG
+
 	public function ___install() {
+
+        $this->modules->get('InputfieldAsmSelect');
+		$this->modules->get('MarkupAdminDataTable');
+
 		if(ProcessWire::versionMajor == 2 && ProcessWire::versionMinor < 1) {
 			throw new WireException("This module requires ProcessWire 2.1 or newer");
 		}
 		$page = $this->getInstalledPage();
+
+
 		$this->message("Installed to {$page->path}");
+
+
+		$table = self::dbTableName;
+		$sql = 	"CREATE TABLE IF NOT EXISTS `$table` (
+					`id` INT AUTO_INCREMENT NOT NULL,
+					`created` UNIX_TIMESTAMP  NOT NULL,
+					`page_id` INT NOT NULL,
+					`draft_id` INT NOT NULL,
+					PRIMARY KEY (`id`)
+				) CHARACTER SET utf8 COLLATE utf8_general_ci";
+
+		$this->database->query($sql);
 	}
-	
+
 	public function ___uninstall() {
-		$page = $this->getInstalledPage();	
+		$page = $this->getInstalledPage();
 		if($page->id) {
 			$this->message("Removed {$page->path}");
 			$this->pages->delete($page);
 		}
+
+		$this->database->query("DROP TABLE IF EXISTS " . self::dbTableName);
 	}
 
 	protected function getInstalledPage() {
@@ -70,12 +461,41 @@ class ProcessPageDraft extends Process {
 			$page->parent = $parent;
 			$page->template = $this->templates->get('admin');
 			$page->name = "draft";
-			$page->title = "Draft Page";
+			$page->title = $this->_("Draft Page");
 			$page->process = $this;
 			$page->sort = $parent->numChildren;
 			$page->save();
 		}
 		return $page;
 	}
-	
+
+	/**
+	 * Build a form allowing configuration of this Module
+	 *
+	 */
+	static public function getModuleConfigInputfields(array $data) {
+
+		$fields = new InputfieldWrapper();
+		$data = array_merge(self::getDefaultData(), $data);
+		$modules = Wire::getFuel('modules');
+
+
+
+		// Scan ancestor nodes for edit permission?
+		$f = $modules->get('InputfieldAsmSelect');
+
+
+		if($f){
+			$f->attr('name', 'allowed_templates');
+			$f->label = __('Enable on templates', __FILE__);
+			echo $f->status;
+			foreach (wire('templates') as $template) {
+				if( $template->flags != Template::flagSystem )
+				$f->addOption($template->name, $template->name);
+			}
+			$f->attr('value', $data['allowed_templates']);
+			$fields->add($f);
+		}
+		return $fields;
+	}
 }
