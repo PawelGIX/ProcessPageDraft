@@ -378,14 +378,23 @@ class ProcessPageDraft extends Process implements Module, ConfigurableModule {
 		// PAGE:
 		$page->name = $originalPage->name;
 		$page->parent = $originalPage->parent;
-		$status = $originalPage->status;
+
+
+
+		if( $originalPage->is(Page::statusHidden) ){
+			$page->addStatus(Page::statusHidden);
+		}else{
+			$page->removeStatus(Page::statusHidden);
+		}
+
+		if( $originalPage->is(Page::statusUnpublished) ){
+			$page->addStatus(Page::statusUnpublished);
+		}else{
+			$page->removeStatus(Page::statusUnpublished);
+		}
+		
 
 		wire('pages')->trash($originalPage);
-
-		// $page->removeStatus(Page::statusHidden);
-		// $page->removeStatus(Page::statusUnpublished);
-		$page->status( $status );
-
 		// SQL:
 		$this->DBdeleteDraftRow( $originalID, $page->id );
 		// assign drafts to new page
