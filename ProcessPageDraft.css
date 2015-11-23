@@ -1,4 +1,4 @@
-
+.PageListItem > a .draft-badge + span:before,
 .PageListItem > a .draft-badge:before{
     display: none;
 }
@@ -17,5 +17,5 @@
 
 .Inputfield__pw_page_name input[readonly="true"]{
     opacity: 0.5;
-    
+
 }
