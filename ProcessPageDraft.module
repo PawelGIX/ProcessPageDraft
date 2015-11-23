@@ -378,11 +378,13 @@ class ProcessPageDraft extends Process implements Module, ConfigurableModule {
 		// PAGE:
 		$page->name = $originalPage->name;
 		$page->parent = $originalPage->parent;
+		$status = $originalPage->status;
 
 		wire('pages')->trash($originalPage);
 
-		$page->removeStatus(Page::statusHidden);
-		$page->removeStatus(Page::statusUnpublished);
+		// $page->removeStatus(Page::statusHidden);
+		// $page->removeStatus(Page::statusUnpublished);
+		$page->status( $status );
 
 		// SQL:
 		$this->DBdeleteDraftRow( $originalID, $page->id );
